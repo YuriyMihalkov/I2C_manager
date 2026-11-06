@@ -17,9 +17,9 @@
 #include <string>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <linux/i2c-dev.h>
+#include <semaphore>
 
-/**
+ /**
  * @class I2cBusInterface
  * @brief Класс для управления и потокобезопасного доступа к одной физической шине I2C.
  *
@@ -38,9 +38,9 @@ public:
      * @brief Деструктор класса. Освобождает системные ресурсы и закрывает файл устройства.
      */
     ~I2cBusInterface() {
-        m_semaphore.acquire(); // Гарантируем, что в момент закрытия шина не используется
-        if (m_fd >= 0) {
-            close(m_fd);
+        semaphore.acquire(); // Гарантируем, что в момент закрытия шина не используется
+        if (fd >= 0) {
+            close(fd);
         }
     }
 
@@ -48,13 +48,13 @@ public:
      * @brief Проверяет, успешно ли открыт файл устройства I2C шины.
      * @return true, если дескриптор файла валиден, иначе false.
      */
-    [[nodiscard]] bool isValid() const noexcept { return m_fd >= 0; }
+    [[nodiscard]] bool isValid() const noexcept { return fd >= 0; }
 
     /**
      * @brief Возвращает системный путь к файлу шины.
      * @return std::string Путь к устройству.
      */
-    [[nodiscard]] std::string devicePath() const noexcept { return m_devicePath; }
+    [[nodiscard]] std::string getDevicePath() const noexcept { return this->devicePath; }
 
     /**
      * @brief Потокобезопасное чтение данных из регистра устройства.
@@ -79,10 +79,29 @@ public:
      */
     bool writeReg(int devAddr, unsigned char reg, unsigned char value);
 
+    /**
+     * @brief Запись произвольной последовательности байт (атомарно под семафором).
+     * @param devAddr Семибитный I2C-адрес.
+     * @param data Буфер с данными для отправки.
+     * @return true при успехе, false при ошибке.
+     */
+    bool writeRaw(int devAddr, std::span<const unsigned char> data);
+
+    /**
+     * @brief Атомарная транзакция: write(txData) → пауза → read(rxData).
+     * @param devAddr Семибитный I2C-адрес.
+     * @param txData Данные для записи (может быть пустым).
+     * @param rxData Буфер для чтения.
+     * @param postWriteDelayMs Задержка между записью и чтением в мс.
+     * @return true при успехе, false при ошибке.
+     */
+    bool transfer(int devAddr,
+                  std::span<const unsigned char> txData,
+                  std::span<unsigned char> rxData,
+                  int postWriteDelayMs = 0);
+
 private:
-    std::string m_devicePath; ///< Путь к файлу устройства Linux.
-    int m_fd;                  ///< Дескриптор файла I2C шины.
-    std::binary_semaphore m_semaphore{1}; ///< Бинарный семафор C++20 для атомарного доступа к шине.
+    std::string devicePath;    ///< Путь к файлу устройства Linux.
+    int fd;                  ///< Дескриптор файла I2C шины.
+    std::binary_semaphore semaphore{1}; ///< Бинарный семафор C++20 для атомарного доступа к шине.
 };
-
-

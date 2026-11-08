@@ -1,9 +1,5 @@
 # =============================================================================
 #  CI для проекта I2C / PCF8574 на Raspberry Pi 3
-#  Раннер: RassberryPiB3Runner (тег)
-#  Требования к раннеру:
-#    - Docker executor (рекомендуется) ИЛИ shell executor
-#    - Доступ к /dev/i2c-1 (проброс устройства или группа i2c)
 # =============================================================================
 
 stages:
@@ -11,33 +7,18 @@ stages:
   - test
 
 variables:
-  # CMake / сборка
   BUILD_DIR: "build"
   CTEST_OUTPUT_ON_FAILURE: "1"
-  # GoogleTest будет писать JUnit-отчёт сюда (см. artifacts)
   GTEST_OUTPUT_FILE: "gtest-report.xml"
-  # GitLab CI не клонирует submodules по умолчанию — включаем, если нужно
   GIT_SUBMODULE_STRATEGY: recursive
 
-# -----------------------------------------------------------------------------
-#  Общий образ для обеих стадий.
-#  Для Raspberry Pi 3 (armhf) используем arm32v7/debian:bookworm.
-#  Если раннер — shell executor, блок `image` игнорируется,
-#  и зависимости ставятся через `before_script` (см. комментарий ниже).
-# -----------------------------------------------------------------------------
 default:
   image: arm32v7/debian:bookworm
   tags:
     - RassberryPiB3Runner
 
-# -----------------------------------------------------------------------------
-#  BUILD
-# -----------------------------------------------------------------------------
 build:
   stage: build
-  before_script:
-    - apt-get update -qq
-    - apt-get install -y -qq build-essential cmake libgtest-dev
   script:
     - echo "==> Конфигурация CMake"
     - cmake -S . -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Debug
@@ -45,43 +26,30 @@ build:
     - cmake --build "${BUILD_DIR}" -j"$(nproc)"
   artifacts:
     paths:
-      - "${BUILD_DIR}/i2c_pcf8574_tests"
+      # Забираем и бинарник, и shared-библиотеку
+      - "${BUILD_DIR}/tests/i2c_pcf8574_tests"
+      - "${BUILD_DIR}/libI2C.so"
     expire_in: 1 week
-  cache:
-    key: "cmake-${CI_COMMIT_REF_SLUG}"
-    paths:
-      - "${BUILD_DIR}/CMakeCache.txt"
-      - "${BUILD_DIR}/CMakeFiles/"
 
-# -----------------------------------------------------------------------------
-#  TEST
-#  ВАЖНО: контейнеру нужен доступ к /dev/i2c-1.
-#  В shell executor этого не требуется — устройство уже доступно хосту.
-#  В Docker executor раскомментируйте `docker:` блок ниже и настройте раннер
-#  с флагом `--device /dev/i2c-1` (см. пояснения после файла).
-# -----------------------------------------------------------------------------
 test:
   stage: test
   dependencies:
     - build
   before_script:
-    - apt-get update -qq
-    - apt-get install -y -qq libgtest-dev
-    # Проверяем, что шина видна (диагностика при падении)
     - 'ls -l /dev/i2c-* || echo "ВНИМАНИЕ: устройство I2C не найдено внутри контейнера"'
   script:
     - echo "==> Запуск GoogleTest"
-    - cd "${BUILD_DIR}"
+    # 1. Указываем системе, где искать libI2C.so
+    - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/${BUILD_DIR}:$LD_LIBRARY_PATH"
+    # 2. Переходим в папку, где лежит бинарник
+    - cd "${BUILD_DIR}/tests"
+    # 3. Запускаем
     - ./i2c_pcf8574_tests --gtest_output="xml:${GTEST_OUTPUT_FILE}"
   artifacts:
     when: always
     reports:
-      junit: "${BUILD_DIR}/${GTEST_OUTPUT_FILE}"
+      # Путь к отчету теперь внутри build/tests/
+      junit: "${BUILD_DIR}/tests/${GTEST_OUTPUT_FILE}"
     paths:
-      - "${BUILD_DIR}/${GTEST_OUTPUT_FILE}"
+      - "${BUILD_DIR}/tests/${GTEST_OUTPUT_FILE}"
     expire_in: 1 month
-  # Раскомментируйте для Docker executor на раннере с --device /dev/i2c-1:
-  # docker:
-  #   - /dev/i2c-1
-  # Если раннер не даёт доступ к устройству — тесты hardware упадут,
-  # а manager-тесты (синглтон, bad path) всё равно пройдут.

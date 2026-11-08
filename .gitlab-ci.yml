@@ -68,7 +68,7 @@ test:
     - apt-get update -qq
     - apt-get install -y -qq libgtest-dev
     # Проверяем, что шина видна (диагностика при падении)
-    - ls -l /dev/i2c-* || echo "ВНИМАНИЕ: /dev/i2c-* не найден внутри контейнера"
+    - 'ls -l /dev/i2c-* || echo "ВНИМАНИЕ: устройство I2C не найдено внутри контейнера"'
   script:
     - echo "==> Запуск GoogleTest"
     - cd "${BUILD_DIR}"
